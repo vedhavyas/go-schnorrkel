@@ -1,6 +1,8 @@
 package schnorrkel
 
 import (
+	"crypto/rand"
+
 	"github.com/gtank/merlin"
 	r255 "github.com/gtank/ristretto255"
 )
@@ -41,22 +43,27 @@ func (sk *SecretKey) Sign(t *merlin.Transcript) (*Signature, error) {
 
 	t.AppendMessage([]byte("sign:pk"), pubc[:])
 
-	// note: TODO: merlin library doesn't have build_rng yet.
-	// see https://github.com/w3f/schnorrkel/blob/798ab3e0813aa478b520c5cf6dc6e02fd4e07f0a/src/context.rs#L153
-	// r := t.ExtractBytes([]byte("signing"), 32)
-
-	// choose random r (nonce)
-	r, err := NewRandomScalar()
+	tr := t.BuildRNG()
+	tr, err = tr.ReKeyWithWitnessBytes([]byte("signing"), sk.nonce[:]).Finalize(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
+
+	r := r255.NewScalar()
+	b := make([]byte, 64)
+	_, err = tr.Read(b)
+	if err != nil {
+		return nil, err
+	}
+
+	r = r.FromUniformBytes(b)
 	R := r255.NewElement().ScalarBaseMult(r)
 	t.AppendMessage([]byte("sign:R"), R.Encode([]byte{}))
 
 	// form k
 	kb := t.ExtractBytes([]byte("sign:c"), 64)
 	k := r255.NewScalar()
-	k.FromUniformBytes(kb)
+	k = k.FromUniformBytes(kb)
 
 	// form scalar from secret key x
 	x, err := ScalarFromBytes(sk.key)
